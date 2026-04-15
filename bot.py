@@ -253,6 +253,7 @@ def main():
             ASK_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quantity)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        allow_reentry=True,
     )
 
     app.add_handler(conv)
