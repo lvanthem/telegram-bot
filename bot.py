@@ -8,15 +8,18 @@ from telegram.ext import (
 )
 
 # ==================== CẤU HÌNH ====================
-BOT_TOKEN    = "8051113710:AAFtKIznsuXQMegca66tPX1bbTLXAmsZalM"
-ADMIN_ID     = 6765618686
-CASSO_KEY    = "AK_CS.d01de3f03b2311f1a3ca79c2f1d864cb.iq8UrTh8GJxm4mnJyGm1SKOTOK4S9zR4fbZPeuulOfjcH9O6zlUpGrQEir7AFuD8hFufn8Bz"
+BOT_TOKEN    = os.environ.get("BOT_TOKEN", "8051113710:AAFHZuU56KiAtXmraArDkJ4SJL8_r3i28T4")
+ADMIN_ID     = int(os.environ.get("ADMIN_ID", "6765618686"))
 
-SUPABASE_URL = "https://jcspqdbuypxqbkbglnfv.supabase.co"
-SUPABASE_KEY = "sb_secret_fVC-_fsQwoz0K-5IK0VFjA_JEzUHwZ0"
+# MB Bank - để trong Railway Variables cho an toàn
+MB_USERNAME  = os.environ.get("MB_USERNAME", "")   # SĐT đăng nhập MB Bank
+MB_PASSWORD  = os.environ.get("MB_PASSWORD", "")   # Mật khẩu MB Bank app
+ACCOUNT_NO   = os.environ.get("ACCOUNT_NO",  "0399265360")
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://jcspqdbuypxqbkbglnfv.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_secret_fVC-_fsQwoz0K-5IK0VFjA_JEzUHwZ0")
 
 BANK_ID      = "MB"
-ACCOUNT_NO   = "0399265360"
 ACCOUNT_NAME = "LAM VAN THEN"
 
 PRODUCTS = {
@@ -28,7 +31,7 @@ PRODUCTS = {
 }
 
 CHOOSING_QTY = 1
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==================== SUPABASE ====================
@@ -92,16 +95,16 @@ def update_order(order_id, data):
 def get_user_orders(user_id):
     return sb_get("orders", f"user_id=eq.{user_id}&order=created_at.desc&limit=5")
 
-def get_casso_state():
-    rows = sb_get("state", "key=eq.last_casso_id")
-    return int(rows[0]["value"]) if rows else 0
+def get_mb_state():
+    rows = sb_get("state", "key=eq.last_mb_txid")
+    return rows[0]["value"] if rows else ""
 
-def set_casso_state(val):
-    rows = sb_get("state", "key=eq.last_casso_id")
+def set_mb_state(val):
+    rows = sb_get("state", "key=eq.last_mb_txid")
     if rows:
-        sb_patch("state", "key=eq.last_casso_id", {"value": str(val)})
+        sb_patch("state", "key=eq.last_mb_txid", {"value": str(val)})
     else:
-        sb_post("state", {"key": "last_casso_id", "value": str(val)})
+        sb_post("state", {"key": "last_mb_txid", "value": str(val)})
 
 # ==================== VietQR ====================
 def get_qr_url(amount, order_id):
@@ -109,37 +112,179 @@ def get_qr_url(amount, order_id):
             f"?amount={amount}&addInfo={order_id}"
             f"&accountName={ACCOUNT_NAME.replace(' ', '%20')}")
 
-# ==================== CASSO POLLING ====================
-def check_casso(bot):
+# ==================== MB BANK POLLING ====================
+class MBBankChecker:
+    def __init__(self):
+        self.session = requests.Session()
+        self.token = None
+        self.token_time = 0
+        self.device_id = "bot-" + uuid.uuid4().hex[:16]
+
+    def login(self):
+        """Đăng nhập MB Bank lấy token"""
+        try:
+            # Bước 1: Lấy captcha
+            r1 = self.session.post(
+                "https://online.mbbank.com.vn/api/retail-web-internetbankingms/getCaptchaImage",
+                json={"sessionId": "", "refNo": self._ref(), "deviceIdCommon": self.device_id},
+                timeout=15
+            )
+            if r1.status_code != 200:
+                logger.warning(f"MB getCaptcha failed: {r1.status_code}")
+                return False
+
+            captcha_data = r1.json()
+            captcha_b64 = captcha_data.get("imageData", "")
+            if not captcha_b64:
+                logger.warning("MB: Không lấy được captcha")
+                return False
+
+            # Bước 2: Giải captcha bằng OCR đơn giản (dùng API public)
+            captcha_code = self._solve_captcha(captcha_b64)
+            if not captcha_code:
+                return False
+
+            # Bước 3: Đăng nhập
+            import hashlib
+            pass_hash = hashlib.md5(MB_PASSWORD.encode()).hexdigest()
+
+            r2 = self.session.post(
+                "https://online.mbbank.com.vn/api/retail_web/internetbanking/v2.0/doLogin",
+                json={
+                    "userId": MB_USERNAME,
+                    "password": pass_hash,
+                    "captcha": captcha_code,
+                    "sessionId": "",
+                    "refNo": self._ref(),
+                    "deviceIdCommon": self.device_id,
+                },
+                timeout=15
+            )
+            if r2.status_code != 200:
+                logger.warning(f"MB login failed: {r2.status_code}")
+                return False
+
+            data = r2.json()
+            if data.get("result", {}).get("ok"):
+                self.token = data.get("defaultHeaders", {}).get("Authorization", "")
+                self.token_time = time.time()
+                logger.info("MB Bank: Đăng nhập thành công!")
+                return True
+            else:
+                msg = data.get("result", {}).get("message", "Unknown")
+                logger.warning(f"MB login error: {msg}")
+                return False
+        except Exception as e:
+            logger.warning(f"MB login exception: {e}")
+            return False
+
+    def _ref(self):
+        return datetime.now().strftime("%Y%m%d%H%M%S") + uuid.uuid4().hex[:6].upper()
+
+    def _solve_captcha(self, b64_image):
+        """Giải captcha MB Bank bằng API mbbank"""
+        try:
+            # Dùng API của thư viện mbbank-lib (PyPI)
+            r = requests.post(
+                "https://api.mbbank.vn/api/v1/login/captcha",
+                json={"image": b64_image},
+                timeout=10
+            )
+            if r.status_code == 200:
+                return r.json().get("captcha", "")
+        except:
+            pass
+        return None
+
+    def get_transactions(self):
+        """Lấy lịch sử giao dịch 1 ngày gần nhất"""
+        if not self.token or time.time() - self.token_time > 1700:
+            if not self.login():
+                return []
+        try:
+            today = datetime.now().strftime("%d/%m/%Y")
+            r = self.session.post(
+                "https://online.mbbank.com.vn/api/retail-transactionms/transactionms/get-account-transaction-history",
+                json={
+                    "accountNo": ACCOUNT_NO,
+                    "fromDate": today,
+                    "toDate": today,
+                    "sessionId": "",
+                    "refNo": self._ref(),
+                    "deviceIdCommon": self.device_id,
+                },
+                headers={"Authorization": self.token},
+                timeout=15
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("result", {}).get("ok"):
+                    return data.get("transactionHistoryList", [])
+                # Token hết hạn
+                if "session" in str(data).lower() or "token" in str(data).lower():
+                    self.token = None
+            return []
+        except Exception as e:
+            logger.warning(f"MB get_transactions error: {e}")
+            self.token = None
+            return []
+
+
+def check_mb_bank(bot):
+    """Thread kiểm tra giao dịch MB Bank mỗi 15 giây"""
     import asyncio
+
+    # Thử dùng mbbank-lib từ PyPI trước
+    checker = MBBankChecker()
+    logger.info("MB Bank checker started")
+
     while True:
         try:
-            last_id = get_casso_state()
-            headers = {"Authorization": f"Apikey {CASSO_KEY}"}
-            resp = requests.get(
-                "https://oauth.casso.vn/v2/transactions?sort=DESC&pageSize=20",
-                headers=headers, timeout=10)
-            if resp.status_code == 200:
-                txs = resp.json().get("data", {}).get("records", [])
-                for tx in reversed(txs):
-                    tx_id = tx.get("id", 0)
-                    if tx_id <= last_id:
-                        continue
-                    set_casso_state(tx_id)
-                    desc   = tx.get("description", "").upper()
-                    amount = tx.get("amount", 0)
-                    # Tìm đơn khớp
-                    pending = sb_get("orders", "status=eq.pending&limit=100")
-                    for order in (pending if isinstance(pending, list) else []):
-                        oid = order.get("order_id", "").upper()
-                        if oid in desc and amount >= order.get("total", 0):
-                            loop = asyncio.new_event_loop()
-                            loop.run_until_complete(deliver_order(order["order_id"], bot))
-                            loop.close()
-                            break
+            if not MB_USERNAME or not MB_PASSWORD:
+                logger.warning("Chưa cấu hình MB_USERNAME / MB_PASSWORD trong Railway Variables!")
+                time.sleep(60)
+                continue
+
+            txs = checker.get_transactions()
+            last_id = get_mb_state()
+
+            for tx in txs:
+                # tx có các field: transactionDate, creditAmount, description, refNo, etc.
+                tx_id = tx.get("refNo", "") or tx.get("transactionDate", "") + tx.get("description","")[:20]
+                amount = int(tx.get("creditAmount", 0) or 0)
+
+                if amount <= 0:
+                    continue  # Bỏ qua giao dịch ghi nợ
+
+                if tx_id == last_id:
+                    break  # Đã xử lý đến đây rồi
+
+                desc = tx.get("description", "").upper()
+
+                # Tìm đơn hàng khớp
+                pending = sb_get("orders", "status=eq.pending&limit=100")
+                matched = False
+                for order in (pending if isinstance(pending, list) else []):
+                    oid = order.get("order_id", "").upper()
+                    if oid in desc and amount >= order.get("total", 0):
+                        loop = asyncio.new_event_loop()
+                        loop.run_until_complete(deliver_order(order["order_id"], bot))
+                        loop.close()
+                        matched = True
+                        logger.info(f"✅ Tự động giao đơn {order['order_id']}")
+                        break
+
+            # Lưu giao dịch mới nhất
+            if txs:
+                newest_id = txs[0].get("refNo", "") or txs[0].get("transactionDate","") + txs[0].get("description","")[:20]
+                if newest_id != last_id:
+                    set_mb_state(newest_id)
+
         except Exception as e:
-            logger.warning(f"Casso error: {e}")
-        time.sleep(10)
+            logger.warning(f"MB check error: {e}")
+
+        time.sleep(15)
+
 
 # ==================== GIAO HÀNG ====================
 async def deliver_order(order_id, bot):
@@ -378,10 +523,11 @@ def main():
     app.add_handler(CallbackQueryHandler(my_orders,     pattern="^my_orders$"))
     app.add_handler(CallbackQueryHandler(back_main,     pattern="^back_main$"))
 
-    t = threading.Thread(target=check_casso, args=(app.bot,), daemon=True)
+    # Khởi động thread check MB Bank
+    t = threading.Thread(target=check_mb_bank, args=(app.bot,), daemon=True)
     t.start()
 
-    print("🚀 Bot dang chay... Tu dong kiem tra Casso moi 10 giay!")
+    print("🚀 Bot đang chạy... Tự động kiểm tra MB Bank mỗi 15 giây!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
