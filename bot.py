@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 
 # ==================== CẤU HÌNH ====================
-BOT_TOKEN    = "8051113710:AAFtKIznsuXQMegca66tPX1bbTLXAmsZalM"
+BOT_TOKEN    = "8051113710:AAFHZuU56KiAtXmraArDkJ4SJL8_r3i28T4"
 ADMIN_ID     = 6765618686
 CASSO_KEY    = "AK_CS.d01de3f03b2311f1a3ca79c2f1d864cb.iq8UrTh8GJxm4mnJyGm1SKOTOK4S9zR4fbZPeuulOfjcH9O6zlUpGrQEir7AFuD8hFufn8Bz"
 
