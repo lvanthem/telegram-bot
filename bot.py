@@ -17,7 +17,7 @@ SUPABASE_KEY = "sb_secret_fVC-_fsQwoz0K-5IK0VFjA_JEzUHwZ0"
 
 BANK_ID      = "MB"
 ACCOUNT_NO   = "0399265360"
-ACCOUNT_NAME = "LAM VAN THEN"
+ACCOUNT_NAME = "LAM VAN THEM"
 
 PRODUCTS = {
     "SP001": {"name": "Mail New Reg Tay - Bao Trial YouTube",      "price": 15000, "emoji": "📧"},
@@ -382,7 +382,7 @@ def main():
     t.start()
 
     print("🚀 Bot dang chay... Tu dong kiem tra Casso moi 10 giay!")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
