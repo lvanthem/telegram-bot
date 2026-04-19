@@ -382,7 +382,6 @@ def main():
     t.start()
 
     print("🚀 Bot dang chay... Tu dong kiem tra Casso moi 10 giay!")
-    app.run_polling(drop_pending_updates=True)
-
+   app.run_polling(drop_pending_updates=True, close_loop=False)
 if __name__ == "__main__":
     main()
