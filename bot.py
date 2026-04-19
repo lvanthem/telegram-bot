@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 
 # ==================== CẤU HÌNH ====================
-BOT_TOKEN    = "8051113710:AAFHZuU56KiAtXmraArDkJ4SJL8_r3i28T4"
+BOT_TOKEN    = "8051113710:AAFtKIznsuXQMegca66tPX1bbTLXAmsZalM"
 ADMIN_ID     = 6765618686
 CASSO_KEY    = "AK_CS.d01de3f03b2311f1a3ca79c2f1d864cb.iq8UrTh8GJxm4mnJyGm1SKOTOK4S9zR4fbZPeuulOfjcH9O6zlUpGrQEir7AFuD8hFufn8Bz"
 
@@ -17,7 +17,7 @@ SUPABASE_KEY = "sb_secret_fVC-_fsQwoz0K-5IK0VFjA_JEzUHwZ0"
 
 BANK_ID      = "MB"
 ACCOUNT_NO   = "0399265360"
-ACCOUNT_NAME = "LAM VAN THEM"
+ACCOUNT_NAME = "LAM VAN THEN"
 
 PRODUCTS = {
     "SP001": {"name": "Mail New Reg Tay - Bao Trial YouTube",      "price": 15000, "emoji": "📧"},
@@ -382,5 +382,7 @@ def main():
     t.start()
 
     print("🚀 Bot dang chay... Tu dong kiem tra Casso moi 10 giay!")
- app.run_polling(drop_pending_updates=True)
-   if __name__ == "__main__":
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
